@@ -1,0 +1,50 @@
+# Plugin Composer Exporter
+
+The Plugin Composer Exporter for WordPress scans all installed plugins and exports their information to generate new `composer.json` definitions for active and inactive plugins. This tool is particularly useful for developers and site administrators looking to manage WordPress plugin dependencies via Composer.
+
+## Features
+
+- **Scan Installed Plugins**: Automatically detect all installed plugins in a WordPress installation.
+- **Export Composer Definitions**: Generate `composer.json` files for active and inactive plugins, allowing for easy dependency management.
+- **User-Friendly Interface**: Offers a simple administrative backend UI for easy operation.
+- **Selective Export**: Choose specific plugins for inclusion in the generated `composer.json` files.
+
+## Installation
+
+1. **Clone or Download the Plugin**
+
+    Clone this repository or download it into your WordPress site's `wp-content/plugins` directory. If downloaded as a zip file, extract it in the plugins directory.
+
+    ```
+    cd wp-content/plugins
+    git clone https://github.com/jackvargo/plugin-composer-exporter.git
+    ```
+
+2. **Activate the Plugin**
+
+    Log in to your WordPress admin area and navigate to the Plugins page. Locate "Plugin Composer Exporter" in the plugin list and click "Activate".
+
+## Usage
+
+After activation, you will find a new menu item in the WordPress admin dashboard named "Composer Exporter". Navigate to this page, select the plugins you wish to include, and click "Generate Composer Files" to create the `composer.json` files for active and inactive plugins.
+
+The generated files will be saved in the plugin's directory:
+
+- `active-plugins-composer.json` for active plugins.
+- `inactive-plugins-composer.json` for inactive plugins.
+
+## Contributing
+
+Contributions are welcome. Please feel free to submit pull requests or create issues for bugs and feature requests.
+
+## Security
+
+If you discover any security-related issues, please email the author instead of using the issue tracker.
+
+## License
+
+The Plugin Composer Exporter is open-sourced software licensed under the [MIT license](LICENSE).
+
+## Credits
+
+- [Jack Vargo](https://flipgoal.com)

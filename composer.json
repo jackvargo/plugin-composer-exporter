@@ -1,0 +1,23 @@
+{
+    "name": "flipgoal/plugin-composer-exporter",
+    "description": "Exports installed WordPress plugins into composer.json definitions for active and inactive plugins.",
+    "type": "wordpress-plugin",
+    "require": {
+        "php": ">=7.0"
+    },
+    "authors": [
+        {
+            "name": "Jack Vargo",
+            "email": "jack@flipgoal.com"
+        }
+    ],
+    "license": "GPL-2.0-or-later",
+    "autoload": {
+        "psr-4": {
+            "flipgoal\\PluginComposerExporter\\": "src/"
+        }
+    },
+    "extra": {
+        "installer-name": "plugin-composer-exporter"
+    }
+}
