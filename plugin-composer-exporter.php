@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Plugin Composer Exporter
- * Description: Scans all installed plugins and exports their information to generate new composer.json definitions for active and inactive plugins.
+ * Description: Exports selected plugin information to a single JSON file with active and inactive plugins.
  * Version: 1.0
  * Author: Your Name
  */
@@ -24,145 +24,121 @@ function pce_admin_page_content() {
     $all_plugins = get_plugins();
     echo '<div class="wrap">';
     echo '<h1>Plugin Composer Exporter</h1>';
-    if (isset($_POST['generate_composer'])) {
-        check_admin_referer('pce_generate_composer');
-        $selected_plugins = isset($_POST['plugins']) ? array_map('sanitize_text_field', $_POST['plugins']) : array();
-        pce_generate_composer_files($selected_plugins);
-    } else {
-        echo '<form method="post">';
-        wp_nonce_field('pce_generate_composer');
-        echo '<p>Select the plugins to generate composer.json files for:</p>';
-        echo '<ul>';
-        foreach ($all_plugins as $path => $details) {
-            $slug = dirname($path);
-            echo '<li><input type="checkbox" name="plugins[]" value="' . esc_attr($slug) . '" checked> ' . esc_html($details['Name']) . '</li>';
+    if (isset($_POST['save_settings'])) {
+        // Save settings
+        $plugin_sources = isset($_POST['plugin_sources']) ? $_POST['plugin_sources'] : array();
+        foreach ($plugin_sources as $slug => $source) {
+            if (!isset($source['is_wpackagist'])) {
+                $plugin_sources[$slug]['is_wpackagist'] = false;
+            }
         }
-        echo '</ul>';
-        echo '<input type="submit" name="generate_composer" class="button button-primary" value="Generate Composer Files">';
-        echo '</form>';
+        update_option('pce_plugin_sources', $plugin_sources);
+        echo '<p>Settings saved successfully.</p>';
+    } elseif (isset($_POST['generate_composer'])) {
+        $selected_plugins = isset($_POST['plugins']) ? $_POST['plugins'] : array();
+        $composer_json_content = pce_generate_composer_file($selected_plugins);
     }
+
+    $saved_sources = get_option('pce_plugin_sources', array());
+
+    echo '<form method="post">';
+    echo '<p>Select the plugins and specify their sources:</p>';
+    echo '<ul>';
+    foreach ($all_plugins as $path => $details) {
+        $slug = dirname($path);
+        $is_wpackagist = isset($saved_sources[$slug]['is_wpackagist']) ? $saved_sources[$slug]['is_wpackagist'] : true;
+        $repo_url = isset($saved_sources[$slug]['repo_url']) ? $saved_sources[$slug]['repo_url'] : '';
+        echo '<li style="margin-bottom: 10px;">';
+        echo '<input type="checkbox" name="plugins[]" value="' . esc_attr($slug) . '" checked> ' . esc_html($details['Name']);
+        echo '<div style="margin-left: 20px;">';
+        echo '<label><input type="checkbox" name="plugin_sources[' . esc_attr($slug) . '][is_wpackagist]" value="1"' . checked($is_wpackagist, true, false) . ' onclick="toggleRepoUrl(this, \'' . esc_attr($slug) . '\')"> WPackagist</label>';
+        echo '<input type="text" id="repo_url_' . esc_attr($slug) . '" name="plugin_sources[' . esc_attr($slug) . '][repo_url]" value="' . esc_attr($repo_url) . '" placeholder="Repository URL" ' . disabled($is_wpackagist, true, false) . ' style="margin-left: 10px; width: 50%;">';
+        echo '</div>';
+        echo '</li>';
+    }
+    echo '</ul>';
+    echo '<input type="submit" name="save_settings" class="button button-primary" value="Save Settings">';
+    echo '<input type="submit" name="generate_composer" class="button button-primary" value="Generate Composer File">';
+    echo '</form>';
     echo '</div>';
+    
+    if (isset($composer_json_content)) {
+        echo '<h2>Generated composer.json</h2>';
+        echo '<textarea style="width: 100%; height: 300px;">' . esc_textarea($composer_json_content) . '</textarea>';
+    }
+
+    echo '<script>
+    function toggleRepoUrl(checkbox, slug) {
+        var repoUrlField = document.getElementById("repo_url_" + slug);
+        repoUrlField.disabled = checkbox.checked;
+    }
+    </script>';
 }
 
-function pce_generate_composer_files($selected_plugins) {
-    global $wp_filesystem;
-
-    // Ensure selected_plugins is an array
+function pce_generate_composer_file($selected_plugins) {
     if (!is_array($selected_plugins)) {
         $selected_plugins = array();
     }
 
-    // Get all plugins
     $all_plugins = get_plugins();
     $active_plugins = get_option('active_plugins');
+    $saved_sources = get_option('pce_plugin_sources', array());
     
-    $active = [];
-    $inactive = [];
+    $plugins_data = [
+        'active' => [],
+        'inactive' => []
+    ];
     
-    // Filter plugins based on selection and active status
-    foreach ($all_plugins as $path => $details) {
-        $slug = dirname($path);
-        if (!in_array($slug, $selected_plugins)) {
-            continue; // Skip plugins not selected
-        }
-        if (in_array($path, $active_plugins)) {
-            $active[$slug] = $details;
-        } else {
-            $inactive[$slug] = $details;
-        }
-    }
-    
-    // Generate composer.json content
-    $active_content = pce_generate_composer_content($active);
-    $inactive_content = pce_generate_composer_content($inactive);
-    
-    // Initialize WP Filesystem
-    if (false === ($credentials = request_filesystem_credentials('', '', false, false, null))) {
-        return; // stop processing here
-    }
-
-    if (!WP_Filesystem($credentials)) {
-        echo '<p>Could not access filesystem.</p>';
-        return;
-    }
-    
-    // Save to files
-    $wp_filesystem->put_contents(plugin_dir_path(__FILE__) . 'active-plugins-composer.json', json_encode($active_content, JSON_PRETTY_PRINT));
-    $wp_filesystem->put_contents(plugin_dir_path(__FILE__) . 'inactive-plugins-composer.json', json_encode($inactive_content, JSON_PRETTY_PRINT));
-    
-    echo '<p>Composer files generated successfully.</p>';
-}
-
-function pce_generate_composer_content($plugins) {
     $composer_content = [
-        'repositories' => [
-            [
-                'type' => 'composer',
-                'url' => 'https://wpackagist.org'
-            ]
-        ],
+        'repositories' => [],
         'require' => []
     ];
 
-    foreach ($plugins as $slug => $details) {
-        $version = isset($details['Version']) ? $details['Version'] : 'dev-master';
-        
-        // Construct the WPackagist plugin name
-        $wpackagist_slug = "wpackagist-plugin/$slug";
-        
-        // Check if the plugin exists on WPackagist (this function should be updated or removed)
-        if (plugin_exists_on_wpackagist($wpackagist_slug, $version)) {
-            $composer_content['require'][$wpackagist_slug] = $version;
-        } else {
-            // Fallback logic if the plugin does not exist on WPackagist
-            $repo_url = null;
-            if (isset($details['PluginURI'])) {
-                $repo_url = $details['PluginURI'];
-            } elseif (isset($details['AuthorURI'])) {
-                $repo_url = $details['AuthorURI'];
-            }
-            
-            if ($repo_url) {
-                $composer_content['repositories'][] = [
-                    'type' => 'vcs',
-                    'url' => $repo_url
-                ];
-                $composer_content['require'][$slug] = $version;
-            }
-        }
+    $exported_slugs = [];
 
-        // Include plugin description if available
-        if (isset($details['Description']) && !empty($details['Description'])) {
-            $composer_content['description'] = $details['Description'];
+    foreach ($all_plugins as $path => $details) {
+        $slug = dirname($path);
+        if (!in_array($slug, $selected_plugins)) {
+            continue;
+        }
+        $is_active = in_array($path, $active_plugins);
+        $plugins_data[$is_active ? 'active' : 'inactive'][$slug] = $details;
+        $exported_slugs[] = $slug;
+
+        if (isset($saved_sources[$slug]['is_wpackagist']) && $saved_sources[$slug]['is_wpackagist']) {
+            $composer_content['require']["wpackagist-plugin/$slug"] = $details['Version'];
+        } else {
+            $repo_url = $saved_sources[$slug]['repo_url'];
+            $composer_content['repositories'][] = [
+                'type' => 'vcs',
+                'url' => $repo_url
+            ];
+
+            // Extract repository owner from the URL and use it in the require statement
+            $owner = parse_url($repo_url, PHP_URL_PATH);
+            $owner = explode('/', trim($owner, '/'))[0];
+            $composer_content['require']["$owner/$slug"] = $details['Version'];
         }
     }
 
-    return $composer_content;
+    $datecode = date('dHis');
+    $filename = plugin_dir_path(__FILE__) . "exported_plugins_{$datecode}.json";
+    file_put_contents($filename, json_encode($plugins_data, JSON_PRETTY_PRINT));
+    
+    $composer_filename = plugin_dir_path(__FILE__) . "composer_{$datecode}.json";
+    $composer_json_content = json_encode($composer_content, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    file_put_contents($composer_filename, $composer_json_content);
+
+    // Log the exported plugin slugs
+    $exported_slugs_list = implode(', ', $exported_slugs);
+    echo '<p>Composer file generated successfully: ' . $composer_filename . '</p>';
+    echo '<p>Exported plugins: ' . $exported_slugs_list . '</p>';
+    pce_log_to_console("Composer file generated successfully: " . $composer_filename);
+    pce_log_to_console("Exported plugins: " . $exported_slugs_list);
+    
+    return $composer_json_content;
 }
 
-function plugin_exists_on_wpackagist($plugin_name, $version) {
-    $url = "https://wpackagist.org/search?q=$plugin_name";
-    $response = wp_remote_get($url);
-
-    if (is_wp_error($response)) {
-        return false;
-    }
-
-    $body = wp_remote_retrieve_body($response);
-    
-    // Create a new DOMDocument and load the HTML
-    $dom = new DOMDocument();
-    @$dom->loadHTML($body); // Suppress warnings from invalid HTML
-
-    // Use XPath to find the relevant nodes
-    $xpath = new DOMXPath($dom);
-    $nodes = $xpath->query("//a[contains(@href, '/packages/$plugin_name')]");
-
-    // Check if any nodes were found
-    if ($nodes->length > 0) {
-        // Further validation could be added here to check for the specific version
-        return true;
-    }
-
-    return false;
+function pce_log_to_console($message) {
+    echo '<script>console.log(' . json_encode($message) . ');</script>';
 }
